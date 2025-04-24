@@ -49,14 +49,14 @@ fi
 sudo ln -sf "$EXEC_PATH" /usr/local/bin/mac-file-organizer
 sudo chmod +x /usr/local/bin/mac-file-organizer
 
-# Create a wrapper script that activates the virtual environment
+# Create a wrapper script with ABSOLUTE paths (fixing the main issue)
 WRAPPER_PATH="/usr/local/bin/mac-file-organizer-wrapper"
-cat > /tmp/mac-file-organizer-wrapper << 'EOF'
+cat > /tmp/mac-file-organizer-wrapper << EOF
 #!/bin/bash
 # Wrapper script to activate the virtual environment before running mac-file-organizer
-PROJECT_DIR="$(dirname "$(dirname "$(readlink -f "$0")")")"
-source "$PROJECT_DIR/.venv/bin/activate"
-"$PROJECT_DIR/.venv/bin/mac-file-organizer" "$@"
+# Using absolute paths to avoid path resolution issues
+source "$PROJECT_ROOT/.venv/bin/activate"
+"$PROJECT_ROOT/.venv/bin/mac-file-organizer" "\$@"
 EOF
 
 sudo mv /tmp/mac-file-organizer-wrapper "$WRAPPER_PATH"
@@ -74,10 +74,15 @@ cp "$PLIST_SRC" "$PLIST_DEST"
 sed -i '' "s#~/Library#$HOME/Library#g" "$PLIST_DEST"
 sed -i '' "s#/usr/local/bin/mac-file-organizer#$WRAPPER_PATH#g" "$PLIST_DEST"
 
-# Load the LaunchAgent
+# Ensure log directories exist
+mkdir -p "$HOME/Library/Logs"
+
+# Unload first if already loaded
 if launchctl list | grep -q "com.user.mac-file-organizer"; then
     launchctl unload "$PLIST_DEST"
 fi
+
+# Load the LaunchAgent
 launchctl load "$PLIST_DEST"
 
 echo "Mac File Organizer has been installed and started!"
