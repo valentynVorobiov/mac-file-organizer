@@ -20,7 +20,9 @@ class FileGrouper:
         self.common_words = {
             'active', 'new', 'copy', 'backup', 'final', 'draft', 'old', 'image',
             'file', 'document', 'untitled', 'screenshot', 'photo', 'picture',
-            'scan', 'export', 'import', 'temp', 'tmp', 'test', 'sample', 'demo'
+            'scan', 'export', 'import', 'temp', 'tmp', 'test', 'sample', 'demo',
+            'menu', 'icon', 'button', 'tile', 'list', 'item', 'header', 'footer',
+            'sidebar', 'navbar', 'panel', 'tab', 'background', 'logo', 'banner'
         }
 
         # Date pattern for grouping date-based files
@@ -29,8 +31,8 @@ class FileGrouper:
                                        r'\d{8}|'  # YYYYMMDD
                                        r'17\d{8})')  # Specific timestamp pattern seen in files
 
-        # Similarity threshold for fuzzy matching
-        self.similarity_threshold = 0.65
+        # Higher similarity threshold for fuzzy matching to avoid false positives
+        self.similarity_threshold = 0.8
 
         # Minimum prefix length to consider for grouping
         self.min_prefix_length = 4
@@ -38,7 +40,7 @@ class FileGrouper:
         # Regular expression for finding business/product names
         self.business_prefix_pattern = re.compile(r'^([A-Za-z0-9]+[-_.][A-Za-z0-9]+|[A-Za-z]{3,})')
 
-        # Minimum file count to form a group - REQUIRE AT LEAST 2 FILES
+        # Strict minimum file count to form a group
         self.min_files_for_group = 2
 
     def find_group_for_file(self, file_path, target_dir):
@@ -57,7 +59,7 @@ class FileGrouper:
         stem = file_path.stem
         extension = file_path.suffix.lower()
 
-        # 1. Check for existing groups with exact matches
+        # Only check for existing groups - never suggest new ones
         for group_dir in target_dir.iterdir():
             if not group_dir.is_dir():
                 continue
@@ -66,33 +68,14 @@ class FileGrouper:
             if group_dir.name.lower() in self.common_words:
                 continue
 
-            # Check if filename contains group name as a distinct word
-            if (re.search(r'\b' + re.escape(group_dir.name.lower()) + r'\b',
-                         stem.lower())):
-                return group_dir.name
+            # Only add to existing group if there's a STRONG match
+            if self._is_strong_match(stem, group_dir.name):
+                # Check if the group has at least one file already
+                file_count = sum(1 for _ in group_dir.iterdir() if _.is_file())
+                if file_count > 0:
+                    return group_dir.name
 
-        # 2. Use fuzzy matching for similar filenames
-        best_match = None
-        highest_similarity = 0
-
-        for group_dir in target_dir.iterdir():
-            if not group_dir.is_dir():
-                continue
-
-            # Check similarity with existing files in the group
-            for existing_file in group_dir.iterdir():
-                if not existing_file.is_file():
-                    continue
-
-                similarity = self._calculate_name_similarity(stem, existing_file.stem)
-                if similarity > highest_similarity and similarity >= self.similarity_threshold:
-                    highest_similarity = similarity
-                    best_match = group_dir.name
-
-        if best_match:
-            return best_match
-
-        # 3. No suitable existing group found
+        # No suitable existing group found
         return "Ungrouped"
 
     def find_group_for_folder(self, folder_path, target_dir):
@@ -109,7 +92,7 @@ class FileGrouper:
         # Extract folder name
         folder_name = folder_path.name
 
-        # 1. Check for existing groups with exact matches
+        # Only check for existing groups - never suggest new ones
         for group_dir in target_dir.iterdir():
             if not group_dir.is_dir():
                 continue
@@ -118,38 +101,52 @@ class FileGrouper:
             if group_dir.name.lower() in self.common_words:
                 continue
 
-            # Check if folder name contains group name as a distinct word
-            if (re.search(r'\b' + re.escape(group_dir.name.lower()) + r'\b',
-                         folder_name.lower())):
-                return group_dir.name
+            # Only add to existing group if there's a STRONG match
+            if self._is_strong_match(folder_name, group_dir.name):
+                # Check if the group has at least one subfolder already
+                subfolder_count = sum(1 for _ in group_dir.iterdir() if _.is_dir())
+                if subfolder_count > 0:
+                    return group_dir.name
 
-        # 2. Use fuzzy matching for similar folder names
-        best_match = None
-        highest_similarity = 0
-
-        for group_dir in target_dir.iterdir():
-            if not group_dir.is_dir():
-                continue
-
-            # Check if this is a meaningful group name (not just a common word)
-            if group_dir.name.lower() in self.common_words:
-                continue
-
-            # Check similarity with existing folder names in the group
-            for existing_folder in group_dir.iterdir():
-                if not existing_folder.is_dir():
-                    continue
-
-                similarity = self._calculate_name_similarity(folder_name, existing_folder.name)
-                if similarity > highest_similarity and similarity >= self.similarity_threshold:
-                    highest_similarity = similarity
-                    best_match = group_dir.name
-
-        if best_match:
-            return best_match
-
-        # 3. No suitable group found
+        # No suitable group found
         return "Ungrouped"
+
+    def _is_strong_match(self, name, group_name):
+        """
+        Determine if a file/folder name strongly matches a group name.
+
+        Args:
+            name (str): File or folder name
+            group_name (str): Group name to compare against
+
+        Returns:
+            bool: True if there's a strong match, False otherwise
+        """
+        # Convert to lowercase for case-insensitive comparison
+        name_lower = name.lower()
+        group_lower = group_name.lower()
+
+        # 1. Exact name match (case-insensitive)
+        if name_lower == group_lower:
+            return True
+
+        # 2. Strong prefix match (e.g., "document-1" matches group "Document")
+        if (name_lower.startswith(group_lower + '-') or
+            name_lower.startswith(group_lower + '_')):
+            return True
+
+        # 3. Strong suffix match (e.g., "old-document" matches group "Document")
+        if name_lower.endswith('-' + group_lower) or name_lower.endswith('_' + group_lower):
+            return True
+
+        # 4. Complete word match within name (with word boundaries)
+        if re.search(r'\b' + re.escape(group_lower) + r'\b', name_lower):
+            # Verify this isn't just matching a common word
+            if group_lower not in self.common_words:
+                return True
+
+        # No strong match found
+        return False
 
     def _extract_business_prefix(self, name):
         """

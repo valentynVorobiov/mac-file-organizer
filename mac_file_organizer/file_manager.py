@@ -203,21 +203,147 @@ class FileManager:
                 # Find all ungrouped files (directly in the extension directory)
                 ungrouped_files = [f for f in extension_dir.iterdir() if f.is_file()]
 
-                if len(ungrouped_files) < 2:
+                if len(ungrouped_files) < self.grouper.min_files_for_group:
                     continue
 
-                # Group files by business/vendor prefixes
-                self._group_by_prefixes(ungrouped_files, extension_dir)
+                # First analysis - identify potential groups
+                potential_groups = self._identify_potential_groups(ungrouped_files)
 
-                # Look for date-based patterns in remaining ungrouped files
-                remaining_ungrouped = [f for f in extension_dir.iterdir() if f.is_file()]
-                if len(remaining_ungrouped) >= 2:
-                    self._group_by_date_patterns(remaining_ungrouped, extension_dir)
+                # Only create groups with multiple files
+                for group_name, group_files in potential_groups.items():
+                    if len(group_files) >= self.grouper.min_files_for_group:
+                        # Create group folder
+                        group_dir = extension_dir / group_name
+                        group_dir.mkdir(exist_ok=True)
 
-                # Final pass - look for any other similarities
-                final_ungrouped = [f for f in extension_dir.iterdir() if f.is_file()]
-                if len(final_ungrouped) >= 2:
-                    self._group_similar_files(final_ungrouped, extension_dir)
+                        # Move files to group
+                        for file_path in group_files:
+                            if file_path.exists():  # It might have been moved already
+                                target_path = group_dir / file_path.name
+
+                                # Handle name conflicts
+                                if target_path.exists() and target_path != file_path:
+                                    base_name = file_path.stem
+                                    extension = file_path.suffix
+                                    counter = 1
+                                    while target_path.exists() and target_path != file_path:
+                                        new_name = f"{base_name}_{counter}{extension}"
+                                        target_path = group_dir / new_name
+                                        counter += 1
+
+                                try:
+                                    file_path.rename(target_path)
+                                    logger.info(f"Grouped file {file_path} into {group_name}")
+                                except Exception as e:
+                                    logger.error(f"Error moving file {file_path} to group {group_name}: {e}")
+
+    def _identify_potential_groups(self, files):
+        """
+        Identify potential groups among a set of files.
+
+        Args:
+            files (list): List of file paths
+
+        Returns:
+            dict: Mapping of group names to lists of files
+        """
+        # Dictionary to track potential groups
+        potential_groups = defaultdict(list)
+
+        # First pass - look for obvious prefix groups
+        for file_path in files:
+            # Skip files that don't exist (might have been moved already)
+            if not file_path.exists():
+                continue
+
+            stem = file_path.stem
+
+            # Try to extract a meaningful prefix
+            prefix = self.grouper._extract_business_prefix(stem)
+            if prefix and len(prefix) >= self.grouper.min_prefix_length:
+                # Standardize prefix format
+                group_name = prefix.capitalize()
+                potential_groups[group_name].append(file_path)
+
+        # Second pass - look for similar files
+        # We'll only do this for files not already grouped
+        already_grouped = set()
+        for group_files in potential_groups.values():
+            already_grouped.update(group_files)
+
+        remaining_files = [f for f in files if f not in already_grouped and f.exists()]
+
+        # Compare files in pairs
+        for i, file1 in enumerate(remaining_files):
+            for file2 in remaining_files[i + 1:]:
+                # Skip if either file was already processed
+                if file1 in already_grouped or file2 in already_grouped:
+                    continue
+
+                # Compare names with high similarity threshold
+                similarity = self.grouper._calculate_name_similarity(file1.stem, file2.stem)
+
+                if similarity >= self.grouper.similarity_threshold:
+                    # Find a meaningful group name
+                    group_name = self._find_meaningful_group_name(file1, file2)
+
+                    if group_name != "Ungrouped":
+                        if file1 not in potential_groups[group_name]:
+                            potential_groups[group_name].append(file1)
+                            already_grouped.add(file1)
+                        if file2 not in potential_groups[group_name]:
+                            potential_groups[group_name].append(file2)
+                            already_grouped.add(file2)
+
+        # Remove any groups that don't have enough files
+        return {k: v for k, v in potential_groups.items() if len(v) >= self.grouper.min_files_for_group}
+
+    def _find_meaningful_group_name(self, file1, file2):
+        """
+        Find a meaningful group name for two similar files.
+
+        Args:
+            file1 (Path): First file
+            file2 (Path): Second file
+
+        Returns:
+            str: A meaningful group name or "Ungrouped"
+        """
+        stem1 = file1.stem
+        stem2 = file2.stem
+
+        # Find common prefix
+        i = 0
+        while i < min(len(stem1), len(stem2)) and stem1[i].lower() == stem2[i].lower():
+            i += 1
+
+        common_prefix = stem1[:i].strip('- _').capitalize()
+        if len(common_prefix) >= self.grouper.min_prefix_length:
+            # Check if this is just a common word
+            if common_prefix.lower() not in self.grouper.common_words:
+                return common_prefix
+
+        # Find common substrings
+        common_words = set()
+        words1 = re.findall(r'\b[A-Za-z]{3,}\b', stem1.lower())
+        words2 = re.findall(r'\b[A-Za-z]{3,}\b', stem2.lower())
+
+        for word in words1:
+            if word in words2 and word not in self.grouper.common_words:
+                common_words.add(word.capitalize())
+
+        if common_words:
+            return next(iter(common_words))
+
+        # Try to extract a business/product name
+        prefix1 = self.grouper._extract_business_prefix(stem1)
+        prefix2 = self.grouper._extract_business_prefix(stem2)
+
+        if prefix1 and prefix1 == prefix2:
+            return prefix1.capitalize()
+
+        # If no good name found, return "Ungrouped"
+        return "Ungrouped"
 
     def _group_by_prefixes(self, files, extension_dir):
         """Group files by their business/vendor prefixes."""
