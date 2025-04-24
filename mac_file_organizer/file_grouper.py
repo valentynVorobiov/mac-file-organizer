@@ -1,247 +1,332 @@
 """
-Logic for grouping similar files.
+Group related files based on naming patterns.
 """
-import logging
+import os
 import re
+import logging
+import difflib
 from pathlib import Path
 from collections import defaultdict
-from difflib import SequenceMatcher
 
 logger = logging.getLogger('mac-file-organizer')
 
 
 class FileGrouper:
-    """Groups similar files based on name patterns."""
+    """Group files based on common patterns and prefixes."""
 
     def __init__(self):
-        """Initialize the file grouper."""
-        # Threshold for considering strings similar (0-1)
-        self.similarity_threshold = 0.6
-
-        # Common patterns to look for in filenames
-        self.date_pattern = re.compile(r'(\d{4}[-_]?\d{2}[-_]?\d{2})')
-        self.time_pattern = re.compile(r'(\d{2}[_:]?\d{2}[_:]?\d{2})')
-        self.common_word_pattern = re.compile(r'[A-Za-z]{3,}')
-
-        # Pattern to extract business/product prefixes
-        self.prefix_pattern = re.compile(r'^([a-zA-Z0-9_-]+?)(?:[_-]|$)')
-
-        # Additional patterns
-        self.invoice_pattern = re.compile(r'(invoice|receipt|bill|payment)[-_\s]?(\d+)', re.IGNORECASE)
-        self.project_pattern = re.compile(r'(project|task|ticket|issue)[-_\s]?(\d+|\w+)', re.IGNORECASE)
-        self.version_pattern = re.compile(r'v\d+(\.\d+)*|version[-_\s]?\d+(\.\d+)*', re.IGNORECASE)
-
-    def find_group_for_file(self, file_path, extension_dir):
-        """Find or create a group for a file."""
-        filename = file_path.stem
-
-        # Check if there are any existing files in existing groups that match this file
-        for group_dir in extension_dir.iterdir():
-            if not group_dir.is_dir():
-                continue
-
-            # Compare this file with files in the group
-            if self._is_similar_to_group(filename, group_dir):
-                return group_dir.name
-
-        # If no matching group found, we don't automatically create a group for a single file
-        # Instead, place it directly in the extension directory using "Ungrouped" as a marker
-        return "Ungrouped"
-
-    def find_group_for_folder(self, folder_path, folders_dir):
-        """Find or create a group for a folder."""
-        folder_name = folder_path.name
-
-        # Check existing groups
-        for group_dir in folders_dir.iterdir():
-            if not group_dir.is_dir():
-                continue
-
-            # Compare this folder with folders in the group
-            if self._is_similar_to_group(folder_name, group_dir):
-                return group_dir.name
-
-        # If no matching group found, we don't automatically create a group for a single folder
-        return "Ungrouped"
-
-    def _is_similar_to_group(self, name, group_dir):
-        """Check if the name is similar to files in the group."""
-        # Get the first few files from the group (for efficiency)
-        files = list(group_dir.iterdir())[:5]
-
-        if not files:
-            return False
-
-        # Extract business/vendor prefix from name
-        name_prefix = self._extract_business_prefix(name)
-
-        # Check similarity with each file
-        for file_path in files:
-            file_name = file_path.stem if file_path.is_file() else file_path.name
-            file_prefix = self._extract_business_prefix(file_name)
-
-            # If both have meaningful prefixes and they match, this is a strong indicator
-            if name_prefix and file_prefix and name_prefix.lower() == file_prefix.lower():
-                return True
-
-            # Calculate similarity score
-            similarity = self._calculate_name_similarity(name, file_name)
-            if similarity >= self.similarity_threshold:
-                return True
-
-        return False
-
-    def _extract_business_prefix(self, name):
-        """Extract business or vendor prefix from filename."""
-        # Try to extract the prefix at the start before any separator
-        prefix_match = self.prefix_pattern.search(name)
-        if prefix_match:
-            prefix = prefix_match.group(1)
-            # Only use the prefix if it's meaningful (not just "file", "image", etc.)
-            if len(prefix) >= 3 and prefix.lower() not in {'file', 'image', 'img', 'doc', 'document', 'test', 'tmp',
-                                                           'temp'}:
-                return prefix
-
-        return None
-
-    def _calculate_name_similarity(self, name1, name2):
-        """Calculate similarity between two filenames."""
-        # Extract prefixes
-        prefix1 = self._extract_business_prefix(name1)
-        prefix2 = self._extract_business_prefix(name2)
-
-        # If both have meaningful prefixes and they match, this is a strong indicator
-        if prefix1 and prefix2 and prefix1.lower() == prefix2.lower():
-            return 1.0
-
-        # Check for date pattern match
-        date_match_1 = self.date_pattern.search(name1)
-        date_match_2 = self.date_pattern.search(name2)
-
-        # For date-based files, only group if the prefixes also match
-        if date_match_1 and date_match_2:
-            if date_match_1.group(0) == date_match_2.group(0):
-                # Same date, but only consider it a match if prefixes are similar
-                if prefix1 and prefix2:
-                    # Calculate prefix similarity
-                    prefix_similarity = SequenceMatcher(None, prefix1.lower(), prefix2.lower()).ratio()
-                    if prefix_similarity >= 0.7:  # Higher threshold for prefix similarity
-                        return 0.8
-                    else:
-                        return 0.4  # Below threshold
-                else:
-                    # Without meaningful prefixes, just having the same date isn't enough
-                    return 0.4  # Below threshold
-
-        # Check for invoice/receipt pattern match
-        invoice_match_1 = self.invoice_pattern.search(name1)
-        invoice_match_2 = self.invoice_pattern.search(name2)
-
-        if invoice_match_1 and invoice_match_2:
-            # If they both have invoice/receipt prefixes
-            if invoice_match_1.group(1).lower() == invoice_match_2.group(1).lower():
-                return 0.8
-
-        # Check for project/task pattern match
-        project_match_1 = self.project_pattern.search(name1)
-        project_match_2 = self.project_pattern.search(name2)
-
-        if project_match_1 and project_match_2:
-            # If they both have project/task prefixes
-            if project_match_1.group(1).lower() == project_match_2.group(1).lower():
-                return 0.8
-
-        # Check for version pattern match
-        version_match_1 = self.version_pattern.search(name1)
-        version_match_2 = self.version_pattern.search(name2)
-
-        if version_match_1 and version_match_2:
-            return 0.8
-
-        # Check for similar words
-        common_words_1 = set(self.common_word_pattern.findall(name1.lower()))
-        common_words_2 = set(self.common_word_pattern.findall(name2.lower()))
-
-        if common_words_1 and common_words_2:
-            # Check for common words
-            common_words = common_words_1.intersection(common_words_2)
-            if len(common_words) >= 2:
-                return 0.8
-            elif len(common_words) == 1 and list(common_words)[0].lower() not in {'the', 'and', 'for', 'with'}:
-                # One significant common word
-                word = list(common_words)[0].lower()
-                # Only consider it meaningful if it's not a common substring of many words
-                if len(word) >= 5 and word not in {'image', 'file', 'doc', 'document', 'report'}:
-                    return 0.7
-                else:
-                    return 0.4  # Below threshold
-
-        # Check overall string similarity as last resort
-        return SequenceMatcher(None, name1.lower(), name2.lower()).ratio()
-
-    def _extract_group_name(self, name):
-        """Extract a suitable group name from the filename."""
-        # First, try to extract business/vendor prefix
-        prefix = self._extract_business_prefix(name)
-        if prefix and len(prefix) >= 3:
-            return prefix.capitalize()
-
-        # Check for common document types
-        document_types = {
-            'invoice': re.compile(r'invoice', re.IGNORECASE),
-            'receipt': re.compile(r'receipt', re.IGNORECASE),
-            'report': re.compile(r'report', re.IGNORECASE),
-            'contract': re.compile(r'contract|agreement', re.IGNORECASE),
-            'presentation': re.compile(r'presentation|slides|deck', re.IGNORECASE),
-            'resume': re.compile(r'resume|cv', re.IGNORECASE),
-            'letter': re.compile(r'letter', re.IGNORECASE),
-            'proposal': re.compile(r'proposal', re.IGNORECASE),
-            'review': re.compile(r'review', re.IGNORECASE),
-            'logs': re.compile(r'logs?', re.IGNORECASE),  # Match 'log' or 'logs'
-            'backup': re.compile(r'backup', re.IGNORECASE),
-            'screenshot': re.compile(r'screenshot|screen', re.IGNORECASE),
-            'form': re.compile(r'form', re.IGNORECASE),
-            'template': re.compile(r'template', re.IGNORECASE),
-            'manual': re.compile(r'manual|guide|instruction', re.IGNORECASE),
-            'notes': re.compile(r'notes?', re.IGNORECASE),  # Match 'note' or 'notes'
-            'script': re.compile(r'scripts?', re.IGNORECASE),  # Match 'script' or 'scripts'
-            'data': re.compile(r'data', re.IGNORECASE),
-            'config': re.compile(r'config|configuration|settings', re.IGNORECASE),
-            'project': re.compile(r'project', re.IGNORECASE)
+        """Initialize the file grouper with patterns and thresholds."""
+        # Common words that should NOT be used for grouping by themselves
+        self.common_words = {
+            'active', 'new', 'copy', 'backup', 'final', 'draft', 'old', 'image',
+            'file', 'document', 'untitled', 'screenshot', 'photo', 'picture',
+            'scan', 'export', 'import', 'temp', 'tmp', 'test', 'sample', 'demo'
         }
 
-        # Check for document type matches
-        for doc_type, pattern in document_types.items():
-            if pattern.search(name):
-                return doc_type.capitalize()
+        # Date pattern for grouping date-based files
+        self.date_pattern = re.compile(r'(20\d{2}[-_]?\d{2}[-_]?\d{2}|'  # YYYY-MM-DD, YYYY_MM_DD
+                                       r'\d{2}[-_]?\d{2}[-_]?20\d{2}|'  # MM-DD-YYYY, MM_DD_YYYY
+                                       r'\d{8}|'  # YYYYMMDD
+                                       r'17\d{8})')  # Specific timestamp pattern seen in files
 
-        # Check for invoice/receipt pattern
-        invoice_match = self.invoice_pattern.search(name)
-        if invoice_match:
-            return invoice_match.group(1).capitalize()
+        # Similarity threshold for fuzzy matching
+        self.similarity_threshold = 0.65
 
-        # Check for project/task pattern
-        project_match = self.project_pattern.search(name)
-        if project_match:
-            return project_match.group(1).capitalize()
+        # Minimum prefix length to consider for grouping
+        self.min_prefix_length = 4
 
-        # Try to extract common words (at least 3 letters long)
-        words = self.common_word_pattern.findall(name)
-        if words:
-            # Filter out common noise words
-            noise_words = {'the', 'and', 'for', 'with', 'from', 'this', 'that', 'have', 'been', 'were', 'file', 'image',
-                           'img', 'doc', 'document', 'test', 'tmp', 'temp'}
-            meaningful_words = [w for w in words if w.lower() not in noise_words and len(w) >= 3 and len(w) <= 15]
+        # Regular expression for finding business/product names
+        self.business_prefix_pattern = re.compile(r'^([A-Za-z0-9]+[-_.][A-Za-z0-9]+|[A-Za-z]{3,})')
 
-            if meaningful_words:
-                # Prefer longer words as they're likely more meaningful
-                meaningful_words.sort(key=len, reverse=True)
-                return meaningful_words[0].capitalize()
+        # Minimum file count to form a group automatically
+        self.min_files_for_group = 2
 
-        # If no meaningful words, try to extract a date
-        date_match = self.date_pattern.search(name)
+    def find_group_for_file(self, file_path, target_dir):
+        """
+        Find the most appropriate group for a file.
+
+        Args:
+            file_path (Path): Path to the file
+            target_dir (Path): Directory where groups are located
+
+        Returns:
+            str: Group name or "Ungrouped" if no suitable group is found
+        """
+        # Extract filename components
+        filename = file_path.name
+        stem = file_path.stem
+        extension = file_path.suffix.lower()
+
+        # 1. Check for existing groups with exact matches
+        for group_dir in target_dir.iterdir():
+            if not group_dir.is_dir():
+                continue
+
+            # Skip if group name is just a common word
+            if group_dir.name.lower() in self.common_words:
+                continue
+
+            # Check if filename contains group name as a distinct word
+            if (re.search(r'\b' + re.escape(group_dir.name.lower()) + r'\b',
+                         stem.lower())):
+                return group_dir.name
+
+        # 2. Try to find a business/product prefix
+        business_prefix = self._extract_business_prefix(stem)
+        if business_prefix and len(business_prefix) >= self.min_prefix_length:
+            # Check if a group with this prefix already exists
+            for group_dir in target_dir.iterdir():
+                if not group_dir.is_dir():
+                    continue
+
+                # Similar prefix (case-insensitive)
+                if (group_dir.name.lower().startswith(business_prefix.lower()) or
+                    business_prefix.lower().startswith(group_dir.name.lower())):
+                    return group_dir.name
+
+            # No existing group found, suggest a new one if prefix is meaningful
+            if business_prefix.lower() not in self.common_words:
+                return business_prefix.capitalize()
+
+        # 3. Check for date-based grouping
+        date_match = self.date_pattern.search(stem)
         if date_match:
-            return date_match.group(0)
+            date_str = date_match.group(0)
+            # Format date more intuitively if it's a full timestamp
+            if len(date_str) > 8:  # It's a detailed timestamp
+                # Extract a more meaningful date format (e.g., YYYY-MM-DD)
+                if date_str.startswith('17'):  # Special timestamp format
+                    formatted_date = f"Date-{date_str[:10]}"
+                else:
+                    # Standard date format
+                    formatted_date = f"Date-{date_str[:10]}"
+                return formatted_date
+            return f"Date-{date_str}"
 
-        # If nothing else works, use a generic group name
+        # 4. Use fuzzy matching for similar filenames
+        best_match = None
+        highest_similarity = 0
+
+        for group_dir in target_dir.iterdir():
+            if not group_dir.is_dir():
+                continue
+
+            # Check similarity with existing files in the group
+            for existing_file in group_dir.iterdir():
+                if not existing_file.is_file():
+                    continue
+
+                similarity = self._calculate_name_similarity(stem, existing_file.stem)
+                if similarity > highest_similarity and similarity >= self.similarity_threshold:
+                    highest_similarity = similarity
+                    best_match = group_dir.name
+
+        if best_match:
+            return best_match
+
+        # 5. No suitable group found
+        return "Ungrouped"
+
+    def find_group_for_folder(self, folder_path, target_dir):
+        """
+        Find the most appropriate group for a folder.
+
+        Args:
+            folder_path (Path): Path to the folder
+            target_dir (Path): Directory where groups are located
+
+        Returns:
+            str: Group name or "Ungrouped" if no suitable group is found
+        """
+        # Extract folder name
+        folder_name = folder_path.name
+
+        # Similar logic as find_group_for_file but adapted for folders
+
+        # 1. Check for existing groups with exact matches
+        for group_dir in target_dir.iterdir():
+            if not group_dir.is_dir():
+                continue
+
+            # Skip if group name is just a common word
+            if group_dir.name.lower() in self.common_words:
+                continue
+
+            # Check if folder name contains group name as a distinct word
+            if (re.search(r'\b' + re.escape(group_dir.name.lower()) + r'\b',
+                         folder_name.lower())):
+                return group_dir.name
+
+        # 2. Try to find a business/product prefix
+        business_prefix = self._extract_business_prefix(folder_name)
+        if business_prefix and len(business_prefix) >= self.min_prefix_length:
+            # Check if a group with this prefix already exists
+            for group_dir in target_dir.iterdir():
+                if not group_dir.is_dir():
+                    continue
+
+                # Similar prefix (case-insensitive)
+                if (group_dir.name.lower().startswith(business_prefix.lower()) or
+                    business_prefix.lower().startswith(group_dir.name.lower())):
+                    return group_dir.name
+
+            # No existing group found, suggest a new one if prefix is meaningful
+            if business_prefix.lower() not in self.common_words:
+                return business_prefix.capitalize()
+
+        # 3. Check for date-based grouping
+        date_match = self.date_pattern.search(folder_name)
+        if date_match:
+            date_str = date_match.group(0)
+            # Format date more intuitively
+            if len(date_str) > 8:  # It's a detailed timestamp
+                formatted_date = f"Date-{date_str[:10]}"
+            else:
+                formatted_date = f"Date-{date_str}"
+            return formatted_date
+
+        # 4. Use fuzzy matching for similar folder names
+        best_match = None
+        highest_similarity = 0
+
+        for group_dir in target_dir.iterdir():
+            if not group_dir.is_dir():
+                continue
+
+            # Check if this is a meaningful group name (not just a common word)
+            if group_dir.name.lower() in self.common_words:
+                continue
+
+            # Check similarity with existing folder names in the group
+            for existing_folder in group_dir.iterdir():
+                if not existing_folder.is_dir():
+                    continue
+
+                similarity = self._calculate_name_similarity(folder_name, existing_folder.name)
+                if similarity > highest_similarity and similarity >= self.similarity_threshold:
+                    highest_similarity = similarity
+                    best_match = group_dir.name
+
+        if best_match:
+            return best_match
+
+        # 5. No suitable group found
+        return "Ungrouped"
+
+    def _extract_business_prefix(self, name):
+        """
+        Extract a likely business or product prefix from a filename.
+
+        Args:
+            name (str): Filename to analyze
+
+        Returns:
+            str: Extracted prefix or empty string if none found
+        """
+        # Remove any numeric prefixes or date prefixes
+        clean_name = re.sub(r'^\d+[-_ ]', '', name)
+        clean_name = re.sub(r'^20\d{2}[-_]\d{2}[-_]\d{2}[-_ ]', '', clean_name)
+
+        # Try to extract a business/product prefix
+        match = self.business_prefix_pattern.search(clean_name)
+        if match:
+            prefix = match.group(1)
+            # Don't use common words as prefixes
+            if prefix.lower() in self.common_words:
+                return ""
+            return prefix
+        return ""
+
+    def _calculate_name_similarity(self, name1, name2):
+        """
+        Calculate similarity between two filenames.
+
+        Args:
+            name1 (str): First filename
+            name2 (str): Second filename
+
+        Returns:
+            float: Similarity score between 0 and 1
+        """
+        # Clean up names for comparison
+        clean1 = self._clean_name_for_comparison(name1)
+        clean2 = self._clean_name_for_comparison(name2)
+
+        # Calculate similarity ratio
+        similarity = difflib.SequenceMatcher(None, clean1, clean2).ratio()
+
+        # Boost similarity for names with common prefixes or common words
+        words1 = set(re.findall(r'\b\w{3,}\b', clean1.lower()))
+        words2 = set(re.findall(r'\b\w{3,}\b', clean2.lower()))
+
+        common_words = words1.intersection(words2)
+
+        # Don't boost similarity based on very common words
+        meaningful_common_words = common_words - self.common_words
+
+        if meaningful_common_words:
+            boost = min(0.2, 0.05 * len(meaningful_common_words))
+            similarity += boost
+
+        return min(1.0, similarity)
+
+    def _clean_name_for_comparison(self, name):
+        """
+        Clean up filename for comparison by removing common suffixes and patterns.
+
+        Args:
+            name (str): Filename to clean
+
+        Returns:
+            str: Cleaned filename
+        """
+        # Remove numbers in parentheses like " (1)", " (2)", etc.
+        cleaned = re.sub(r' \(\d+\)', '', name)
+
+        # Remove version suffixes like "v1", "v2.1", etc.
+        cleaned = re.sub(r' v\d+(\.\d+)?', '', cleaned)
+
+        # Remove date patterns
+        cleaned = re.sub(r'20\d{2}[-_]\d{2}[-_]\d{2}', '', cleaned)
+
+        # Remove common modifiers
+        for modifier in [' - Copy', ' copy', ' final', ' draft', ' new']:
+            cleaned = cleaned.replace(modifier, '')
+
+        return cleaned
+
+    def _extract_group_name(self, filename):
+        """
+        Extract a meaningful group name from a filename.
+
+        Args:
+            filename (str): Filename to analyze
+
+        Returns:
+            str: Suggested group name or "Ungrouped" if none found
+        """
+        # Try to extract a business/product name first
+        business_prefix = self._extract_business_prefix(filename)
+        if business_prefix and len(business_prefix) >= self.min_prefix_length and business_prefix.lower() not in self.common_words:
+            return business_prefix.capitalize()
+
+        # Try to extract a meaningful word (at least 4 letters, not a common word)
+        words = re.findall(r'\b[A-Za-z]{4,}\b', filename)
+        for word in words:
+            if word.lower() not in self.common_words:
+                return word.capitalize()
+
+        # Check for hyphenated words or camelCase that could be meaningful
+        hyphenated = re.search(r'([A-Za-z]{3,})[-_]([A-Za-z]{3,})', filename)
+        if hyphenated:
+            compound = f"{hyphenated.group(1)}-{hyphenated.group(2)}"
+            if compound.lower() not in self.common_words:
+                return compound.capitalize()
+
+        # Check for CamelCase
+        camel_case = re.search(r'([A-Z][a-z]{2,})([A-Z][a-z]{2,})', filename)
+        if camel_case:
+            return camel_case.group(0)
+
+        # If all else fails, return "Ungrouped"
         return "Ungrouped"
