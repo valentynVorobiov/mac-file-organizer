@@ -5,6 +5,7 @@ import os
 import logging
 import time
 import itertools
+import shutil  # Added import for handling app bundles
 from pathlib import Path
 from collections import defaultdict
 
@@ -393,9 +394,19 @@ class FileManager:
                         target_path = review_dir / new_name
                         counter += 1
 
-                # Move the file or folder
-                file_path.rename(target_path)
-                logger.info(f"Moved {file_path} to Review: {target_path}")
+                try:
+                    # Special handling for .app directories
+                    if file_path.is_dir() and str(file_path).endswith('.app'):
+                        # Use shutil for app bundles
+                        shutil.copytree(file_path, target_path, symlinks=True)
+                        shutil.rmtree(file_path)
+                        logger.info(f"Moved application bundle {file_path} to Review: {target_path}")
+                    else:
+                        # Move the file or folder using regular rename
+                        file_path.rename(target_path)
+                        logger.info(f"Moved {file_path} to Review: {target_path}")
+                except Exception as e:
+                    logger.error(f"Error moving {file_path} to Review: {e}")
 
     def _clean_empty_folders(self):
         """Clean up empty folders."""

@@ -32,8 +32,9 @@ class FileMonitor:
         for root, dirs, files in os.walk(directory):
             root_path = Path(root)
 
-            # Skip special folders
-            if any(str(root_path).startswith(str(folder)) for folder in special_folders):
+            # Skip special folders and app bundle internals
+            if (any(str(root_path).startswith(str(folder)) for folder in special_folders) or
+                (".app/" in str(root_path) or ".app\\" in str(root_path))):
                 continue
 
             # Check each file
