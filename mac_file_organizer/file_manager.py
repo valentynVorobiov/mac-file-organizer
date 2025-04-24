@@ -5,6 +5,7 @@ import os
 import logging
 import time
 import itertools
+import re  # Added missing import
 import shutil  # Added import for handling app bundles
 from pathlib import Path
 from collections import defaultdict
