@@ -38,7 +38,7 @@ class FileGrouper:
         # Regular expression for finding business/product names
         self.business_prefix_pattern = re.compile(r'^([A-Za-z0-9]+[-_.][A-Za-z0-9]+|[A-Za-z]{3,})')
 
-        # Minimum file count to form a group automatically
+        # Minimum file count to form a group - REQUIRE AT LEAST 2 FILES
         self.min_files_for_group = 2
 
     def find_group_for_file(self, file_path, target_dir):
@@ -71,39 +71,7 @@ class FileGrouper:
                          stem.lower())):
                 return group_dir.name
 
-        # 2. Try to find a business/product prefix
-        business_prefix = self._extract_business_prefix(stem)
-        if business_prefix and len(business_prefix) >= self.min_prefix_length:
-            # Check if a group with this prefix already exists
-            for group_dir in target_dir.iterdir():
-                if not group_dir.is_dir():
-                    continue
-
-                # Similar prefix (case-insensitive)
-                if (group_dir.name.lower().startswith(business_prefix.lower()) or
-                    business_prefix.lower().startswith(group_dir.name.lower())):
-                    return group_dir.name
-
-            # No existing group found, suggest a new one if prefix is meaningful
-            if business_prefix.lower() not in self.common_words:
-                return business_prefix.capitalize()
-
-        # 3. Check for date-based grouping
-        date_match = self.date_pattern.search(stem)
-        if date_match:
-            date_str = date_match.group(0)
-            # Format date more intuitively if it's a full timestamp
-            if len(date_str) > 8:  # It's a detailed timestamp
-                # Extract a more meaningful date format (e.g., YYYY-MM-DD)
-                if date_str.startswith('17'):  # Special timestamp format
-                    formatted_date = f"Date-{date_str[:10]}"
-                else:
-                    # Standard date format
-                    formatted_date = f"Date-{date_str[:10]}"
-                return formatted_date
-            return f"Date-{date_str}"
-
-        # 4. Use fuzzy matching for similar filenames
+        # 2. Use fuzzy matching for similar filenames
         best_match = None
         highest_similarity = 0
 
@@ -124,7 +92,7 @@ class FileGrouper:
         if best_match:
             return best_match
 
-        # 5. No suitable group found
+        # 3. No suitable existing group found
         return "Ungrouped"
 
     def find_group_for_folder(self, folder_path, target_dir):
@@ -141,8 +109,6 @@ class FileGrouper:
         # Extract folder name
         folder_name = folder_path.name
 
-        # Similar logic as find_group_for_file but adapted for folders
-
         # 1. Check for existing groups with exact matches
         for group_dir in target_dir.iterdir():
             if not group_dir.is_dir():
@@ -157,35 +123,7 @@ class FileGrouper:
                          folder_name.lower())):
                 return group_dir.name
 
-        # 2. Try to find a business/product prefix
-        business_prefix = self._extract_business_prefix(folder_name)
-        if business_prefix and len(business_prefix) >= self.min_prefix_length:
-            # Check if a group with this prefix already exists
-            for group_dir in target_dir.iterdir():
-                if not group_dir.is_dir():
-                    continue
-
-                # Similar prefix (case-insensitive)
-                if (group_dir.name.lower().startswith(business_prefix.lower()) or
-                    business_prefix.lower().startswith(group_dir.name.lower())):
-                    return group_dir.name
-
-            # No existing group found, suggest a new one if prefix is meaningful
-            if business_prefix.lower() not in self.common_words:
-                return business_prefix.capitalize()
-
-        # 3. Check for date-based grouping
-        date_match = self.date_pattern.search(folder_name)
-        if date_match:
-            date_str = date_match.group(0)
-            # Format date more intuitively
-            if len(date_str) > 8:  # It's a detailed timestamp
-                formatted_date = f"Date-{date_str[:10]}"
-            else:
-                formatted_date = f"Date-{date_str}"
-            return formatted_date
-
-        # 4. Use fuzzy matching for similar folder names
+        # 2. Use fuzzy matching for similar folder names
         best_match = None
         highest_similarity = 0
 
@@ -210,7 +148,7 @@ class FileGrouper:
         if best_match:
             return best_match
 
-        # 5. No suitable group found
+        # 3. No suitable group found
         return "Ungrouped"
 
     def _extract_business_prefix(self, name):

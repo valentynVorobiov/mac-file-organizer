@@ -231,7 +231,8 @@ class FileManager:
 
         # Create folders for prefix groups with multiple files
         for prefix, group_files in prefix_groups.items():
-            if len(group_files) >= 2:
+            # Only create a group if there are AT LEAST 2 FILES
+            if len(group_files) >= self.grouper.min_files_for_group:
                 # Create a folder with the prefix name
                 group_dir = extension_dir / prefix.capitalize()
                 group_dir.mkdir(exist_ok=True)
@@ -271,7 +272,8 @@ class FileManager:
 
         # Process date groups with multiple files
         for date_value, group_files in date_groups.items():
-            if len(group_files) >= 2:
+            # Only create a group if there are AT LEAST 2 FILES
+            if len(group_files) >= self.grouper.min_files_for_group:
                 # Check if these files also have common prefixes
                 prefixes = [self.grouper._extract_business_prefix(f.stem) for f in group_files]
                 prefixes = [p for p in prefixes if p]
@@ -281,7 +283,7 @@ class FileManager:
                     continue
 
                 # Create a date-based group
-                group_dir = extension_dir / date_value
+                group_dir = extension_dir / f"Date-{date_value}"
                 group_dir.mkdir(exist_ok=True)
 
                 # Move files to the group folder
@@ -301,9 +303,9 @@ class FileManager:
 
                         try:
                             file_path.rename(target_path)
-                            logger.info(f"Grouped file {file_path} into date group {date_value}")
+                            logger.info(f"Grouped file {file_path} into date group Date-{date_value}")
                         except Exception as e:
-                            logger.error(f"Error moving file {file_path} to date group {date_value}: {e}")
+                            logger.error(f"Error moving file {file_path} to date group Date-{date_value}: {e}")
 
     def _group_similar_files(self, files, extension_dir):
         """Group similar files based on name similarity."""
@@ -336,7 +338,8 @@ class FileManager:
 
         # Create groups
         for group_name, group_files in potential_groups.items():
-            if len(group_files) >= 2:  # Only create a group if there are at least 2 files
+            # Only create a group if there are AT LEAST 2 FILES
+            if len(group_files) >= self.grouper.min_files_for_group:
                 # Create the group folder
                 group_dir = extension_dir / group_name
                 group_dir.mkdir(exist_ok=True)
