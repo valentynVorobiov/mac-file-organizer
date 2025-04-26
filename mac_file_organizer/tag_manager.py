@@ -3,7 +3,7 @@ Managing macOS file tags.
 """
 import logging
 import subprocess
-from pathlib import Path
+# from pathlib import Path
 
 from mac_file_organizer.config import MANUAL_TAG_COLOR, REVIEW_TAG_COLOR
 

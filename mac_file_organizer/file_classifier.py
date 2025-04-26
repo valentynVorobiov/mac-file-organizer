@@ -3,7 +3,7 @@ Logic for classifying files by type.
 """
 import logging
 import mimetypes
-from pathlib import Path
+# from pathlib import Path
 
 from mac_file_organizer.config import get_file_categories
 

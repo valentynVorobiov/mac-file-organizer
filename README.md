@@ -30,6 +30,9 @@ cd mac-file-organizer
 
 # Run the installation script
 bash scripts/install.sh
+#Or give +x rights to executable and run
+chmod +x scripts/install.sh
+./scripts/install.sh
 ```
 
 The script will:
@@ -130,7 +133,3 @@ mac-file-organizer/
 │
 └── tests/                      # Test suite
 ```
-
-## License
-
-MIT License

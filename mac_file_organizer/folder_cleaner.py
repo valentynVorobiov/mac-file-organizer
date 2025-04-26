@@ -2,7 +2,7 @@
 Logic for removing empty folders.
 """
 import logging
-from pathlib import Path
+# from pathlib import Path
 
 from mac_file_organizer.config import (
     MANUAL_FOLDER_NAME, REVIEW_FOLDER_NAME
